@@ -1,5 +1,11 @@
+//! Note crates only allows 1 second per request so this tends to take several+
+//! minutes.
+//! ideally also generate an index.js turned into star and watch github
+//! buttons
+
 use cargo_lock::Lockfile;
 use crates_io_api::SyncClient;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use std::process::Command;
 
@@ -16,13 +22,35 @@ fn main() {
     let mut packages = lockfile.packages;
     packages.sort_by(|a, b| b.name.cmp(&a.name));
 
-    packages
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(80);
+    pb.set_style(
+        ProgressStyle::default_spinner()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"])
+            .template("{spinner:.blue} {msg}"),
+    );
+    pb.set_message("pinging crates.io api at 1 req/s");
+
+    let mut packages: Vec<String> = packages
         .iter()
+        //dedup multiple versions of dep
         .dedup_by(|x, y| x.name == y.name)
-        .for_each(|p| {
-            let dep = client.full_crate(p.name.as_str(), false).unwrap();
-            println!("{}", dep.repository.unwrap_or_default());
-        });
+        //look up crate on crates.io
+        .map(|p| {
+            let c = client.full_crate(p.name.as_str(), false).unwrap();
+            pb.inc(1);
+            c
+        })
+        //just return unwrapped repository
+        .filter_map(|c|c.repository).collect();
+
+    pb.finish();
+
+    //often repos have several packages, so need to sort and dedup again
+    packages.sort();
+    packages.iter().dedup().for_each(|repo| {
+        println!("{}", repo);
+    });
 }
 
 pub fn generate() {
